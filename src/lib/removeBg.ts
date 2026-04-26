@@ -1,59 +1,53 @@
-const REMOVE_BG_ENDPOINT = "https://api.remove.bg/v1.0/removebg";
+/**
+ * Remove.bg は本番ではVercel API Route (/api/remove-bg) 経由でサーバーサイドプロキシで叩く。
+ * 開発時(vite dev)はvite.config.ts の middleware が同等のproxyを提供する。
+ */
 
-const getApiKey = (): string => {
+const ENDPOINT = "/api/remove-bg";
+
+const getDirectApiKey = (): string => {
+  // 開発フォールバック用：CORSが許可されていれば直接呼べる場合に備えて
   return import.meta.env.VITE_REMOVE_BG_API_KEY ?? "";
 };
 
-export const isRemoveBgConfigured = (): boolean => !!getApiKey();
+export const isRemoveBgConfigured = (): boolean => {
+  // クライアント側はAPI Routeに投げるだけなので、APIキーの有無はサーバー側次第。
+  // VITE_REMOVE_BG_API_KEY があれば「設定済」と表示する（fallbackあり）
+  return !!getDirectApiKey();
+};
 
 /** Base64データURLから背景を除去してBase64 PNG (透過) を返す */
 export const removeBackground = async (
   imageDataUrl: string
 ): Promise<string> => {
-  const apiKey = getApiKey();
-  if (!apiKey) {
-    throw new Error("Remove.bg APIキーが設定されていません");
-  }
-
-  // データURLをBlobに変換
-  const blob = await dataUrlToBlob(imageDataUrl);
-
-  const formData = new FormData();
-  formData.append("image_file", blob, "input.jpg");
-  formData.append("size", "preview"); // preview = 最大0.25MP・無料枠で使える
-  formData.append("format", "png");
-
-  const response = await fetch(REMOVE_BG_ENDPOINT, {
+  const response = await fetch(ENDPOINT, {
     method: "POST",
-    headers: {
-      "X-Api-Key": apiKey,
-    },
-    body: formData,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ imageDataUrl }),
   });
 
   if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(`Remove.bg API失敗 (${response.status}): ${text.slice(0, 200)}`);
+    const errorText = await response.text().catch(() => "");
+    let detail = errorText;
+    try {
+      const j = JSON.parse(errorText);
+      detail = j.detail || j.error || errorText;
+    } catch {
+      // not JSON
+    }
+    throw new Error(
+      `背景除去失敗 (HTTP ${response.status}): ${String(detail).slice(0, 200)}`
+    );
   }
 
-  const resultBlob = await response.blob();
-  return await blobToDataUrl(resultBlob);
+  const json = await response.json();
+  if (!json.imageDataUrl) {
+    throw new Error("レスポンスに imageDataUrl がありません");
+  }
+  return json.imageDataUrl as string;
 };
 
-const dataUrlToBlob = async (dataUrl: string): Promise<Blob> => {
-  const r = await fetch(dataUrl);
-  return await r.blob();
-};
-
-const blobToDataUrl = (blob: Blob): Promise<string> =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(new Error("読み込み失敗"));
-    reader.readAsDataURL(blob);
-  });
-
-/** ファイルが大きすぎないか、輪郭が取れそうなアスペクトかをざっくり検証 */
+/** 画像をRemove.bg向けに縮小（API容量節約） */
 export const resizeForBgRemoval = (
   imageDataUrl: string,
   maxDim = 1024

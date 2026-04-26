@@ -160,10 +160,10 @@ export class BattleScene extends Phaser.Scene {
     this.timerText.setOrigin(0.5, 0);
     this.timerText.setDepth(20);
 
-    // タイマー：scene時刻が0や負になる稀なケースに備えて0以上を保証
-    this.timerEndAt = Math.max(this.time.now, 0) + BATTLE_DURATION;
-    this.startedAtMs = this.time.now;
-    console.log("[BattleScene] timer set", { now: this.time.now, endAt: this.timerEndAt });
+    // タイマー：Date.now() ベースで統一（Phaserのscene時間と混同しないため）
+    this.startedAtMs = Date.now();
+    this.timerEndAt = this.startedAtMs + BATTLE_DURATION;
+    console.log("[BattleScene] timer set", { startedAt: this.startedAtMs, endAt: this.timerEndAt });
 
     // キー入力
     this.keys = this.input1Keys();
@@ -335,11 +335,12 @@ export class BattleScene extends Phaser.Scene {
     this.p1.fighter.update(time, delta);
     this.p2.fighter.update(time, delta);
 
-    // タイマー（FIGHT! 開始演出の1秒後から実カウントを始める）
-    const remain = Math.max(0, this.timerEndAt - time);
+    // タイマー（Date.now()ベースで判定、Phaser内部時刻とは独立）
+    const realNow = Date.now();
+    const remain = Math.max(0, this.timerEndAt - realNow);
     this.timerText.setText(Math.ceil(remain / 1000).toString());
-    // 開始から最低3秒は経過しないと終了させない（演出中の誤発火防止）
-    if (remain <= 0 && time - this.startedAtMs > 3000) {
+    // 開始から最低5秒は経過しないと終了させない（演出中の誤発火防止）
+    if (remain <= 0 && realNow - this.startedAtMs > 5000) {
       this.finishByTime();
     }
 

@@ -25,9 +25,20 @@
 ```bash
 npm install
 cp .env.example .env.local
-# .env.local に Firebase と Anthropic API キーを設定
+# .env.local に Firebase / Anthropic / Remove.bg API キーを設定
 npm run dev
 ```
+
+### 環境変数
+
+| 変数名 | 用途 | クライアント露出 |
+|---|---|---|
+| `VITE_ANTHROPIC_API_KEY` | 必殺技生成・実況 | ⚠ 露出する |
+| `VITE_FIREBASE_*` | オンライン対戦 | ⚠ 露出する（Firebaseは前提） |
+| `REMOVE_BG_API_KEY` | 背景除去（**サーバー側のみ**） | ✅ 露出しない |
+| `VITE_REMOVE_BG_API_KEY` | 同上の互換fallback | ⚠ 露出する |
+
+Remove.bg APIキーは `/api/remove-bg` Vercel Serverless Function 経由でサーバー側で使うため、`REMOVE_BG_API_KEY`（`VITE_` prefixなし）を推奨。Vercel Project Settings → Environment Variables にも同じ名前で追加。
 
 ## 操作方法（PC）
 - A/D: 移動

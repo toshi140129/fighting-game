@@ -34,7 +34,6 @@ const loadImageToCanvas = (dataUrl: string, maxDim: number): Promise<string> =>
   });
 
 export const UploadScreen = ({ onNext }: Props) => {
-  const [rawPhotoUrl, setRawPhotoUrl] = useState<string>("");
   const [photoUrl, setPhotoUrl] = useState<string>("");
   const [name, setName] = useState("");
   const [processing, setProcessing] = useState(false);
@@ -49,20 +48,22 @@ export const UploadScreen = ({ onNext }: Props) => {
     }
     setError(null);
     setPhotoUrl("");
-    setRawPhotoUrl("");
+    setProcessing(true);
 
     const reader = new FileReader();
     reader.onload = async (e) => {
       const result = e.target?.result;
-      if (typeof result !== "string") return;
+      if (typeof result !== "string") {
+        setProcessing(false);
+        return;
+      }
+      let preview = "";
       try {
-        // プレビュー用にひとまず縮小
-        const preview = await loadImageToCanvas(result, PORTRAIT_MAX);
-        setRawPhotoUrl(preview);
+        // プレビュー用に縮小
+        preview = await loadImageToCanvas(result, PORTRAIT_MAX);
 
-        // 背景除去（APIキーがあれば）
         if (removeBgReady) {
-          setProcessing(true);
+          // 背景除去：完了するまでプレビュー表示しない
           const small = await resizeForBgRemoval(preview, 1024);
           const cutout = await removeBackground(small);
           setPhotoUrl(cutout);
@@ -72,11 +73,16 @@ export const UploadScreen = ({ onNext }: Props) => {
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : "画像処理失敗";
-        setError(msg + "（背景除去をスキップして元画像を使用）");
-        setPhotoUrl(rawPhotoUrl || (typeof result === "string" ? result : ""));
+        setError(msg + "（元画像で続行します）");
+        // フォールバック：元画像でも進めるように
+        if (preview) setPhotoUrl(preview);
       } finally {
         setProcessing(false);
       }
+    };
+    reader.onerror = () => {
+      setError("ファイル読み込み失敗");
+      setProcessing(false);
     };
     reader.readAsDataURL(file);
   };
@@ -109,29 +115,24 @@ export const UploadScreen = ({ onNext }: Props) => {
                 backgroundPosition: "0 0, 0 8px, 8px -8px, -8px 0px",
               }}
             >
-              {photoUrl ? (
+              {processing ? (
+                <div className="flex flex-col items-center justify-center">
+                  <div className="w-16 h-16 border-4 border-purple-500/30 border-t-purple-400 rounded-full animate-spin"></div>
+                  <p className="text-yellow-300 font-bold text-lg mt-4 animate-pulse">
+                    背景除去中...
+                  </p>
+                  <p className="text-xs text-purple-300 mt-1">数秒かかります</p>
+                </div>
+              ) : photoUrl ? (
                 <img
                   src={photoUrl}
-                  alt="プレビュー"
+                  alt="切り抜き済み"
                   className="w-full h-full object-contain"
-                />
-              ) : rawPhotoUrl ? (
-                <img
-                  src={rawPhotoUrl}
-                  alt="処理中"
-                  className="w-full h-full object-contain opacity-40"
                 />
               ) : (
                 <div className="text-center">
                   <p className="text-4xl mb-2">＋</p>
                   <p className="text-sm text-purple-300">タップして写真を選択</p>
-                </div>
-              )}
-              {processing && (
-                <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
-                  <p className="text-yellow-300 font-bold text-lg animate-pulse">
-                    背景除去中...
-                  </p>
                 </div>
               )}
             </div>
