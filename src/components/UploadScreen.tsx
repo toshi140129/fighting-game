@@ -1,68 +1,137 @@
 import { useRef, useState } from "react";
+import { isRemoveBgConfigured, removeBackground, resizeForBgRemoval } from "../lib/removeBg";
 
 interface Props {
   onNext: (data: { name: string; photoUrl: string }) => void;
 }
 
+const PORTRAIT_MAX = 600;
+
+const loadImageToCanvas = (dataUrl: string, maxDim: number): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      let { width, height } = img;
+      const maxOf = Math.max(width, height);
+      if (maxOf > maxDim) {
+        const s = maxDim / maxOf;
+        width = Math.round(width * s);
+        height = Math.round(height * s);
+      }
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        reject(new Error("canvas context取得失敗"));
+        return;
+      }
+      ctx.drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL("image/png"));
+    };
+    img.onerror = () => reject(new Error("画像読み込み失敗"));
+    img.src = dataUrl;
+  });
+
 export const UploadScreen = ({ onNext }: Props) => {
+  const [rawPhotoUrl, setRawPhotoUrl] = useState<string>("");
   const [photoUrl, setPhotoUrl] = useState<string>("");
   const [name, setName] = useState("");
+  const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const removeBgReady = isRemoveBgConfigured();
 
   const handleFile = (file: File) => {
     if (!file.type.startsWith("image/")) {
       alert("画像ファイルを選択してください");
       return;
     }
+    setError(null);
+    setPhotoUrl("");
+    setRawPhotoUrl("");
+
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       const result = e.target?.result;
-      if (typeof result === "string") {
-        const img = new Image();
-        img.onload = () => {
-          const canvas = document.createElement("canvas");
-          const maxSize = 400;
-          let { width, height } = img;
-          if (width > height && width > maxSize) {
-            height = (height * maxSize) / width;
-            width = maxSize;
-          } else if (height > maxSize) {
-            width = (width * maxSize) / height;
-            height = maxSize;
-          }
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext("2d");
-          ctx?.drawImage(img, 0, 0, width, height);
-          setPhotoUrl(canvas.toDataURL("image/jpeg", 0.8));
-        };
-        img.src = result;
+      if (typeof result !== "string") return;
+      try {
+        // プレビュー用にひとまず縮小
+        const preview = await loadImageToCanvas(result, PORTRAIT_MAX);
+        setRawPhotoUrl(preview);
+
+        // 背景除去（APIキーがあれば）
+        if (removeBgReady) {
+          setProcessing(true);
+          const small = await resizeForBgRemoval(preview, 1024);
+          const cutout = await removeBackground(small);
+          setPhotoUrl(cutout);
+        } else {
+          // APIキー未設定時は元画像をそのまま使う
+          setPhotoUrl(preview);
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "画像処理失敗";
+        setError(msg + "（背景除去をスキップして元画像を使用）");
+        setPhotoUrl(rawPhotoUrl || (typeof result === "string" ? result : ""));
+      } finally {
+        setProcessing(false);
       }
     };
     reader.readAsDataURL(file);
   };
 
-  const canProceed = !!photoUrl && name.trim().length > 0;
+  const canProceed = !!photoUrl && name.trim().length > 0 && !processing;
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-900 to-purple-900 text-white p-4">
       <div className="max-w-md mx-auto">
         <h1 className="text-3xl font-bold text-center mb-2 mt-8">キャラを作る</h1>
-        <p className="text-center text-purple-200 mb-8">写真と名前を入力してね</p>
+        <p className="text-center text-purple-200 mb-2">写真と名前を入力してね</p>
+        <div className="text-center text-yellow-300 text-sm mb-4 px-2">
+          📸 全身が写るように撮影してください
+          <br />
+          <span className="text-xs text-yellow-200/80">
+            （背景は自動で除去されます）
+          </span>
+        </div>
 
         <div className="bg-slate-800/60 rounded-2xl p-6 border border-purple-500/30 space-y-4">
           <div>
-            <label className="block text-sm text-purple-200 mb-2">写真</label>
+            <label className="block text-sm text-purple-200 mb-2">全身写真</label>
             <div
-              onClick={() => fileRef.current?.click()}
-              className="aspect-square w-full bg-slate-900/80 border-2 border-dashed border-purple-500/40 rounded-xl flex items-center justify-center cursor-pointer overflow-hidden"
+              onClick={() => !processing && fileRef.current?.click()}
+              className="aspect-[3/4] w-full bg-slate-900/80 border-2 border-dashed border-purple-500/40 rounded-xl flex items-center justify-center cursor-pointer overflow-hidden relative"
+              style={{
+                backgroundImage:
+                  "linear-gradient(45deg, #1a1a2a 25%, transparent 25%), linear-gradient(-45deg, #1a1a2a 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #1a1a2a 75%), linear-gradient(-45deg, transparent 75%, #1a1a2a 75%)",
+                backgroundSize: "16px 16px",
+                backgroundPosition: "0 0, 0 8px, 8px -8px, -8px 0px",
+              }}
             >
               {photoUrl ? (
-                <img src={photoUrl} alt="プレビュー" className="w-full h-full object-cover" />
+                <img
+                  src={photoUrl}
+                  alt="プレビュー"
+                  className="w-full h-full object-contain"
+                />
+              ) : rawPhotoUrl ? (
+                <img
+                  src={rawPhotoUrl}
+                  alt="処理中"
+                  className="w-full h-full object-contain opacity-40"
+                />
               ) : (
                 <div className="text-center">
                   <p className="text-4xl mb-2">＋</p>
                   <p className="text-sm text-purple-300">タップして写真を選択</p>
+                </div>
+              )}
+              {processing && (
+                <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+                  <p className="text-yellow-300 font-bold text-lg animate-pulse">
+                    背景除去中...
+                  </p>
                 </div>
               )}
             </div>
@@ -76,6 +145,12 @@ export const UploadScreen = ({ onNext }: Props) => {
                 if (file) handleFile(file);
               }}
             />
+            {!removeBgReady && (
+              <p className="text-xs text-yellow-200/70 mt-1">
+                ※ Remove.bg APIキー未設定。背景は除去されません
+              </p>
+            )}
+            {error && <p className="text-xs text-red-300 mt-1">{error}</p>}
           </div>
 
           <div>
@@ -95,7 +170,7 @@ export const UploadScreen = ({ onNext }: Props) => {
             disabled={!canProceed}
             className="w-full bg-purple-600 hover:bg-purple-500 disabled:opacity-40 rounded-lg py-3 font-bold text-lg"
           >
-            次へ
+            {processing ? "処理中..." : "次へ"}
           </button>
         </div>
       </div>

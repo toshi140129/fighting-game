@@ -36,7 +36,11 @@ export class BootScene extends Phaser.Scene {
     if (p2) waitFor.push(this.waitTexture("photo_p2"));
 
     Promise.all(waitFor).finally(() => {
-      this.scene.start("Battle");
+      try {
+        this.scene.start("Battle");
+      } catch (e) {
+        console.warn("[BootScene] scene.start(Battle) failed:", e);
+      }
     });
   }
 
